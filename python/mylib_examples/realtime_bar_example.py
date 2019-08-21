@@ -1,3 +1,9 @@
+"""---If the libary is in a different folder we need to use the sys module---"""
+import sys
+# insert at 1, 0 is the script path:
+sys.path.insert(1, "C:/Users/Luki/Documents/GitHub/ReadSensorValues/python")
+
+"""--------------Bar chart and MyPort example------------------"""
 import mylib.myio.myport as mp
 import mylib.myplot.mygraph as mg
 

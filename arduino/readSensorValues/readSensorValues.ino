@@ -90,6 +90,6 @@ void read_serial_command() {
  * continously read sensor values and send them over serial connection
  */
 void loop() {
-  switch_through_mux(buff_size, 10, sensor_buff);
+  switch_through_mux(buff_size, 20, sensor_buff);
   my_print(sensor_buff, buff_size);
 }
