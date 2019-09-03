@@ -1,7 +1,7 @@
 import pygame
 from pygame.locals import *
 
-import sys, os
+import sys
 import glm
 import time
 import math
@@ -13,9 +13,16 @@ from OpenGL.GL import *
 from mesh import Mesh
 from shader import Shader
 from camera import Camera
+from utils import fullpath
 
 
 class Renderer(object):
+    """
+    Contains 3 shaders to render 3 different Mesh "types":
+    shaderPC - Mesh with position and color attributes
+    shaderPT - Mesh with position and texture
+    shaderPCT - Mesh with position, color and texture
+    """
     def __init__(self, width, height):
         """---------Create Camera--------"""
         camera = Camera()
@@ -27,9 +34,6 @@ class Renderer(object):
         projection = glm.perspective(glm.radians(45.0), width/height, 0.1, 100.0)
 
         """--------------Compile Shaders--------------"""
-        def fullpath(filename):
-            return os.path.join(os.path.dirname(sys.path[0]), "libary", filename)
-
         shader = Shader(fullpath("shaderPC.vs"), fullpath("shaderPC.fs"))
         shader.use()
         shader.setMatrix("view", view)
@@ -54,6 +58,10 @@ class Renderer(object):
         # for drawing position, color and texture - data
         self.shaderPCT = shader
 
+        shader = Shader(fullpath("GUIshader.vs"), fullpath("GUIshader.fs"))
+        # for drawing GUI elements
+        self.GUIshader = shader
+
     def selectShader(self, type):
         if type == "PC":
             return self.shaderPC
@@ -61,6 +69,8 @@ class Renderer(object):
             return self.shaderPT
         elif type == "PCT":
             return self.shaderPCT
+        elif type == "GUI":
+            return self.GUIshader
 
     def render(self, obj, type):
         shader = self.selectShader(type)
@@ -84,9 +94,19 @@ class Renderer(object):
 
 
 class Window(object):
-    def __init__(self, width, height):
+    def __init__(self, width=0, height=0):
         pygame.init()
-        pygame.display.set_mode((width, height), flags=DOUBLEBUF|OPENGL)
+        if width !=0 and height != 0:
+            pygame.display.set_mode((width, height), flags=DOUBLEBUF|OPENGL)
+        else:
+            pygame.display.set_mode((0, 0), flags=DOUBLEBUF|OPENGL|FULLSCREEN)
+            width = pygame.display.Info().current_w
+            height = pygame.display.Info().current_h
+
+        pygame.mouse.set_pos([width/2, height/2])
+        pygame.mouse.set_visible(False)
+        self.mouse_is_visible = False
+        pygame.event.set_grab(True)
 
         glViewport(0, 0, width, height)
         glEnable(GL_DEPTH_TEST)
@@ -96,12 +116,30 @@ class Window(object):
         glPointSize(8)
 
         self.last_frame_time = time.time()
+        # control camera with w, a, s, d keys:
         self.w_pressed = False
         self.a_pressed = False
         self.s_pressed = False
         self.d_pressed = False
+        # control movement with up, left, down, right arrow keys:
+        self.up_pressed = False
+        self.left_pressed = False
+        self.down_pressed = False
+        self.right_pressed = False
 
         self.renderer = Renderer(width, height)
+
+        # if we want to move a graphics object using arrow keys:
+        self.moveableObj = None
+
+        # if we want to detect clicks on GUI elements:
+        self.clickableObjs = []
+
+        self.width = width
+        self.height = height
+
+        self.oldX = None
+        self.oldY = None
 
     def getRenderer(self):
         return self.renderer
@@ -112,7 +150,24 @@ class Window(object):
     def swapBuffers(self):
         pygame.display.flip()
 
-    def handleEvents(self):
+    def enableMovement(self, obj):
+        """
+        In the handleEvents method arrow keys are used to move the object
+        """
+        self.moveableObj = obj
+
+    def enableClickDetection(self, obj):
+        self.clickableObjs.append(obj)
+
+    def disableClickDetection(self, obj):
+        self.clickableObjs.remove(obj)
+
+    def handleEvents(self, types=None):
+        """
+        Takes a list of shader types as input, e.g: ["PC", "PT", "PTC"]
+        or None, the corresponding shaders getting their view matrix update
+        according to the mouse and keyboard input!
+        """
         current_frame_time = time.time()
         deltaTime = current_frame_time - self.last_frame_time
         self.last_frame_time = current_frame_time
@@ -125,6 +180,18 @@ class Window(object):
                 if event.key == K_ESCAPE:
                     pygame.quit()
                     sys.exit()
+                if event.key == K_LCTRL:
+                    if self.mouse_is_visible:
+                        pygame.mouse.set_visible(False)
+                        self.mouse_is_visible = False
+                        pygame.mouse.set_pos([self.oldX, self.oldY])
+                        x, y = pygame.mouse.get_rel()
+                        pygame.event.set_allowed(MOUSEMOTION)
+                    else:
+                        self.oldX, self.oldY = pygame.mouse.get_pos()
+                        pygame.event.set_blocked(MOUSEMOTION)
+                        pygame.mouse.set_visible(True)
+                        self.mouse_is_visible = True
                 if event.key == K_w:
                     self.w_pressed = True
                 if event.key == K_a:
@@ -133,6 +200,14 @@ class Window(object):
                     self.s_pressed = True
                 if event.key == K_d:
                     self.d_pressed = True
+                if event.key == K_UP:
+                    self.up_pressed = True
+                if event.key == K_LEFT:
+                    self.left_pressed = True
+                if event.key == K_DOWN:
+                    self.down_pressed = True
+                if event.key == K_RIGHT:
+                    self.right_pressed = True
             elif event.type == KEYUP:
                 if event.key == K_w:
                     self.w_pressed = False
@@ -142,10 +217,31 @@ class Window(object):
                     self.s_pressed = False
                 if event.key == K_d:
                     self.d_pressed = False
+                if event.key == K_UP:
+                    self.up_pressed = False
+                if event.key == K_LEFT:
+                    self.left_pressed = False
+                if event.key == K_DOWN:
+                    self.down_pressed = False
+                if event.key == K_RIGHT:
+                    self.right_pressed = False
             elif event.type == MOUSEMOTION:
-                # virtual input mode (see pygame):
                 x, y = pygame.mouse.get_rel()
                 self.renderer.camera.processMouseMovement(x, -y)
+            elif event.type == MOUSEBUTTONUP and len(self.clickableObjs) > 0:
+                x, y = pygame.mouse.get_pos()
+                """
+                Due to the different coordinate systems of OpenGL and pygame we
+                have to convert the x, y values we get to OpenGl's
+                """
+                x = x - self.width/2
+                y = -y + self.height/2
+                x = x / (self.width/2)
+                y = y / (self.height/2)
+                for obj in self.clickableObjs:
+                    if obj.gotClicked(x, y):
+                        obj.execute()
+
 
         if self.w_pressed:
             self.renderer.camera.processKeyboard("forward", deltaTime)
@@ -156,13 +252,37 @@ class Window(object):
         if self.d_pressed:
             self.renderer.camera.processKeyboard("right", deltaTime)
 
-        view = self.renderer.camera.getViewMatrix()
-        self.renderer.updateViewMatrix(view, "PC")
+        # if an object is enabled for movement:
+        if self.moveableObj:
+            if self.up_pressed:
+                self.moveableObj.mesh.move(0, 0.1, 0)
+            if self.left_pressed:
+                self.moveableObj.mesh.move(-0.1, 0, 0)
+            if self.down_pressed:
+                self.moveableObj.mesh.move(0, -0.1, 0)
+            if self.right_pressed:
+                self.moveableObj.mesh.move(0.1, 0, 0)
+
+        # apply camera movement to selected shader "types":
+        # (if mouse is visible we don't want to change camera view)
+        if types and not self.mouse_is_visible:
+            view = self.renderer.camera.getViewMatrix()
+            for type in types:
+                self.renderer.updateViewMatrix(view, type)
 
 
 class Point(list):
-    def __init__(self, x, y, z):
+    """
+    Point/Vector class
+    """
+    def __init__(self, x, y, z, r=0.5, g=0.5, b=0.5):
         list.__init__(self, [x, y, z])
+        positions = [[x, y, z]]
+        colors = [[r, g, b, 1.0]]
+        indices = [0]
+        # positions, indices and colors - lists can be accessed over the mesh
+        self.mesh = Mesh(positions, indices, colors=colors)
+        self.x = x
 
     @property
     def x(self):
@@ -215,8 +335,37 @@ class Point(list):
     def toGlmVec3(self):
         return glm.vec3(self.x, self.y, self.z)
 
+    def toGlmVec4(self):
+        return glm.vec4(self.x, self.y, self.z, 1)
+
+    def fromGlmVec4(glm_vec4):
+        """
+        Class Function to create a Point Instance from glm vec3
+        """
+        return Point(glm_vec4.x, glm_vec4.y, glm_vec4.z)
+
     def __repr__(self):
         return f"({self.x}|{self.y}|{self.z})"
+
+    def draw(self):
+        self.mesh.draw(GL_POINTS, 1, 0)
+
+    def render(self, window):
+        renderer = window.getRenderer()
+        renderer.render(self, "PC")
+
+    class Utils(object):
+        def to_glm_vec4_list(points_list):
+            glm_vec4_list = []
+            for a_point in points_list:
+                glm_vec4_list.append(a_point.toGlmVec4())
+            return glm_vec4_list
+
+        def to_points_list(glm_vec4_list):
+            points_list = []
+            for glm_vec4 in glm_vec4_list:
+                points_list.append(Point.fromGlmVec4(glm_vec4))
+            return points_list
 
 
 class Axis(object):
@@ -294,13 +443,13 @@ class Bar(object):
 
 
 class Label(object):
-    def __init__(self, width=0.5, height=0.5):
+    def __init__(self, imgName, width=0.5, height=0.5):
         self.width = width
         self.height = height
-        positions = [Point(-width/2, 0, 0),
-                     Point(width/2, 0, 0),
-                     Point(-width/2, height, 0),
-                     Point(width/2, height, 0)]
+        positions = [Point(-width/2, -height/2, 0),
+                     Point(width/2, -height/2, 0),
+                     Point(-width/2, height/2, 0),
+                     Point(width/2, height/2, 0)]
         textures = [[0, 0],
                     [1, 0],
                     [0, 1],
@@ -308,7 +457,7 @@ class Label(object):
         indices = [0, 1, 2,
                    3, 2, 1]
         # positions, indices and textures - lists can be accessed over the mesh
-        self.mesh = Mesh(positions, indices, textures=textures)
+        self.mesh = Mesh(positions, indices, textures=textures, imgName=imgName)
 
     def draw(self):
         self.mesh.draw(GL_TRIANGLES, len(self.mesh.indices), 0)
@@ -318,11 +467,50 @@ class Label(object):
         renderer.render(self, "PT")
 
 
+class UI_Label(Label):
+    def __init__(self, imgName, width=0.5, height=0.5):
+        Label.__init__(self, imgName, width=width, height=height)
+        self.screen_posX = 0
+        self.screen_posY = 0
+        self.function = None
+
+    def render(self, window):
+        renderer = window.getRenderer()
+        renderer.render(self, "GUI")
+
+    def move(self, x, y):
+        self.mesh.move(x, y, 0)
+        self.screen_posX = x
+        self.screen_posY = y
+
+    def gotClicked(self, x, y):
+        """
+        Return True if the mouse click is detected inside the
+        Label or False otherwise!
+        """
+        if self.screen_posX - self.width/2 <= x and x <= self.screen_posX + self.width/2:
+            if self.screen_posY - self.height/2 <= y and y <= self.screen_posY + self.height/2:
+                return True
+        return False
+
+    def onClick(self, function):
+        """
+        Set the function which should be executed if clicked!
+        """
+        self.function = function
+
+    def execute(self):
+        self.function()
+
+
+
 class BarPlot(object):
-    def __init__(self, originPoint, xEndPoint, yEndPoint, nbars, maxHeight):
+    def __init__(self, originPoint, xLength, yLength, nbars, maxHeight):
         self.xTick = Tick()
         self.yTick = Tick(oriantation="horizontal")
 
+        xEndPoint = Point(originPoint.x + xLength, originPoint.y, originPoint.z)
+        yEndPoint = Point(originPoint.x, originPoint.y + yLength, originPoint.z)
         self.xAxis = Axis(originPoint, xEndPoint, ticks=nbars)
         self.yAxis = Axis(originPoint, yEndPoint)
 

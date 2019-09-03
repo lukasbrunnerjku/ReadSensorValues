@@ -1,4 +1,5 @@
 import serial
+import sys, os
 
 class Port(serial.Serial):
 
@@ -76,6 +77,9 @@ class Port(serial.Serial):
         for i in range(number_of_bars):
             a_list[i] = float(str_values[i])
         return True
+
+def fullpath(filename):
+    return os.path.join(os.path.dirname(sys.path[0]), "libary", filename)
 
 
 def main():
