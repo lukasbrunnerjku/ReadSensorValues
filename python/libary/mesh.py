@@ -51,6 +51,8 @@ class Mesh():
             toffset = psize # c_void_p will throw errors here!!!
             tsize = textures.nbytes
             data_size = psize + tsize
+        else:
+            data_size = psize
 
         indices = np.array(indices, dtype=np.uint32)
         self.indices = indices # save indices as numpy array for drawing
